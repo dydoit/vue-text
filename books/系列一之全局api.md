@@ -76,8 +76,108 @@ export function initGlobalAPI (Vue: GlobalAPI) {
   initAssetRegisters(Vue)
 }
 ```
-#### 三、Vue全局属性和全局方法
-1. Vue.extend(options)
+#### 三、 Vue源码构建
+Vue源码是基于Rollup构建的，源码工程里一样有个package.json 文件，看部分代码
+```
+{
+  "build": "node scripts/build.js",
+  "build:ssr": "npm run build -- web-runtime-cjs,web-server-renderer",
+  "build:weex": "npm run build -- weex",
+}
+```
+当运行npm bun build时执行“node scripts/build.js”生成Vue这个库的js代码。在scripts/build.js中又去require了config
+```
+let builds = require('./config').getAllBuilds()
+
+// filter builds via command line arg
+if (process.argv[2]) {
+  const filters = process.argv[2].split(',')
+  builds = builds.filter(b => {
+    return filters.some(f => b.output.file.indexOf(f) > -1 || b._name.indexOf(f) > -1)
+  })
+} else {
+  // filter out weex builds by default
+  builds = builds.filter(b => {
+    return b.output.file.indexOf('weex') === -1
+  })
+}
+
+build(builds)
+```
+这段代码逻辑非常简单，先从配置文件读取配置，再通过命令行参数对构建配置做过滤，这样就可以构建出不同用途的 Vue.js 了。接下来我们看一下配置文件，在 scripts/config.js 中：(注意这是最终的boss，不同版本的vue入口文件和出口文件都定义了)
+```
+const builds = {
+  // Runtime only (CommonJS). Used by bundlers e.g. Webpack & Browserify
+  'web-runtime-cjs': {
+    entry: resolve('web/entry-runtime.js'),
+    dest: resolve('dist/vue.runtime.common.js'),
+    format: 'cjs',
+    banner
+  },
+  // Runtime+compiler CommonJS build (CommonJS)
+  'web-full-cjs': {
+    entry: resolve('web/entry-runtime-with-compiler.js'),
+    dest: resolve('dist/vue.common.js'),
+    format: 'cjs',
+    alias: { he: './entity-decoder' },
+    banner
+  },
+  // Runtime only (ES Modules). Used by bundlers that support ES Modules,：不能直接在浏览器中引入，不带编译代码
+  // e.g. Rollup & Webpack 2
+  'web-runtime-esm': {
+    entry: resolve('web/entry-runtime.js'),
+    dest: resolve('dist/vue.runtime.esm.js'),
+    format: 'es',
+    banner
+  },
+  // Runtime+compiler CommonJS build (ES Modules)
+  'web-full-esm': {
+    entry: resolve('web/entry-runtime-with-compiler.js'),
+    dest: resolve('dist/vue.esm.js'),
+    format: 'es',
+    alias: { he: './entity-decoder' },
+    banner
+  },
+  // runtime-only build (Browser) ：可以直接在浏览器引入，未压缩的，不带编译代码
+  'web-runtime-dev': {
+    entry: resolve('web/entry-runtime.js'),
+    dest: resolve('dist/vue.runtime.js'),
+    format: 'umd',
+    env: 'development',
+    banner
+  },
+  // runtime-only production build (Browser)：可以直接在浏览器引入，压缩的，不带编译代码
+  'web-runtime-prod': {
+    entry: resolve('web/entry-runtime.js'),
+    dest: resolve('dist/vue.runtime.min.js'),
+    format: 'umd',
+    env: 'production',
+    banner
+  },
+  // Runtime+compiler development build (Browser)：可以直接在浏览器引入，未压缩最全版
+  'web-full-dev': {
+    entry: resolve('web/entry-runtime-with-compiler.js'),
+    dest: resolve('dist/vue.js'),
+    format: 'umd',
+    env: 'development',
+    alias: { he: './entity-decoder' },
+    banner
+  },
+  // Runtime+compiler production build  (Browser)：可以直接在浏览器引入，压缩最全版
+  'web-full-prod': {
+    entry: resolve('web/entry-runtime-with-compiler.js'),
+    dest: resolve('dist/vue.min.js'),
+    format: 'umd',
+    env: 'production',
+    alias: { he: './entity-decoder' },
+    banner
+  },
+  // ...
+}
+```
+生成dist目录下不同的版本js文件，怎么区分
+- 可直接在浏览器引入使用的： Vue.js()
+#### 四、Vue全局属性和全局方法
 ##### 全局属性
 1. 全局配置对象config，包含 Vue 的全局配置，可以在启动应用前修改里面的属性。源码在src/core/config.js里有定义，包含
 - silent： 默认值是false，表示开启vue日记和警告
