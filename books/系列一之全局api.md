@@ -107,14 +107,14 @@ build(builds)
 这段代码逻辑非常简单，先从配置文件读取配置，再通过命令行参数对构建配置做过滤，这样就可以构建出不同用途的 Vue.js 了。接下来我们看一下配置文件，在 scripts/config.js 中：(注意这是最终的boss，不同版本的vue入口文件和出口文件都定义了)
 ```
 const builds = {
-  // Runtime only (CommonJS). Used by bundlers e.g. Webpack & Browserify
+  // Runtime only (CommonJS). Used by bundlers e.g. Webpack & Browserify：主要用在打包工具browserify里，不带编译代码
   'web-runtime-cjs': {
     entry: resolve('web/entry-runtime.js'),
     dest: resolve('dist/vue.runtime.common.js'),
     format: 'cjs',
     banner
   },
-  // Runtime+compiler CommonJS build (CommonJS)
+  // Runtime+compiler CommonJS build (CommonJS)：主要用在打包工具browserify里，带编译代码
   'web-full-cjs': {
     entry: resolve('web/entry-runtime-with-compiler.js'),
     dest: resolve('dist/vue.common.js'),
@@ -122,7 +122,7 @@ const builds = {
     alias: { he: './entity-decoder' },
     banner
   },
-  // Runtime only (ES Modules). Used by bundlers that support ES Modules,：不能直接在浏览器中引入，不带编译代码
+  // Runtime only (ES Modules). Used by bundlers that support ES Modules,：主要用在webpack不能直接在浏览器中引入，不带编译代码
   // e.g. Rollup & Webpack 2
   'web-runtime-esm': {
     entry: resolve('web/entry-runtime.js'),
@@ -130,7 +130,7 @@ const builds = {
     format: 'es',
     banner
   },
-  // Runtime+compiler CommonJS build (ES Modules)
+  // Runtime+compiler CommonJS build (ES Modules)： 主要用在webpack打包项目里，带编译代码
   'web-full-esm': {
     entry: resolve('web/entry-runtime-with-compiler.js'),
     dest: resolve('dist/vue.esm.js'),
@@ -176,7 +176,13 @@ const builds = {
 }
 ```
 生成dist目录下不同的版本js文件，怎么区分
-- 可直接在浏览器引入使用的： Vue.js()
+- 可直接在浏览器引入使用的： vue.js(开发用，带编译)，vue.min.js(vue.js的压缩版)，vue.runtime.js(不带编译)，vue.runtime.min.js(vue.runtime.js的压缩版)
+- 需要在浏览器中以这种方式用<script type="module"> import Vue from '...'</script>: vue.esm.browser.js(带编译)，vue.esm.browser.min.js（vue.esm.browser.js的压缩版）
+- webpack2.x及以上使用：vue.esm.js（带编译，未压缩，生产自己去压缩），vue.runtime.esm.js（不带编译，未压缩，生产自己去压缩）
+
+**使用webpack开发vue项目时推荐使用vue.runtime.esm.js，更轻量，此时main.js里面必须要有render方法。使用vue-cli脚手架搭建项目时会问你选则runtime+compile还是runtime，当你选择了runtime+compile版本时，项目会默认在webpack.config.base.js里设置alias,把{'vue$':'vue/dist/vue.esm.js'},当你import Vue from 'vue'时重定向到引用完整的vue.esm.js。npm包vue默认指定的引入路径是{module:'vue.runtime.esm.js'}。**
+自己配置webpack项目时直接引就行了。
+
 #### 四、Vue全局属性和全局方法
 ##### 全局属性
 1. 全局配置对象config，包含 Vue 的全局配置，可以在启动应用前修改里面的属性。源码在src/core/config.js里有定义，包含
@@ -302,5 +308,103 @@ Vue.extend = function (extendOptions: Object): Function {
   }
 ```
 如果插件是一个对象，必须提供 install 方法。如果插件是一个函数，它会被作为 install 方法。install 方法调用时，会将 Vue 作为参数传入。相同的插件只会安装一次。
+3. Vue.nextTick([callback,context])
+在下次 DOM 更新循环结束之后执行延迟回调。在修改数据之后立即使用这个方法，获取更新后的 DOM。为什么可以获取更新后的DOM？因为vue的DOM更新是异步执行的过程，内部有一个异步队列。看下nextTick的源码：src/core/util/next-tick.js
+```
+let microTimerFunc
+let macroTimerFunc
+let useMacroTask = false
+
+// Determine (macro) task defer implementation.
+// Technically setImmediate should be the ideal choice, but it's only available
+// in IE. The only polyfill that consistently queues the callback after all DOM
+// events triggered in the same loop is by using MessageChannel.
+/* istanbul ignore if */
+if (typeof setImmediate !== 'undefined' && isNative(setImmediate)) {
+  macroTimerFunc = () => {
+    setImmediate(flushCallbacks)
+  }
+} else if (typeof MessageChannel !== 'undefined' && (
+  isNative(MessageChannel) ||
+  // PhantomJS
+  MessageChannel.toString() === '[object MessageChannelConstructor]'
+)) {
+  const channel = new MessageChannel()
+  const port = channel.port2
+  channel.port1.onmessage = flushCallbacks
+  macroTimerFunc = () => {
+    port.postMessage(1)
+  }
+} else {
+  /* istanbul ignore next */
+  macroTimerFunc = () => {
+    setTimeout(flushCallbacks, 0)
+  }
+}
+
+// Determine microtask defer implementation.
+/* istanbul ignore next, $flow-disable-line */
+if (typeof Promise !== 'undefined' && isNative(Promise)) {
+  const p = Promise.resolve()
+  microTimerFunc = () => {
+    p.then(flushCallbacks)
+    // in problematic UIWebViews, Promise.then doesn't completely break, but
+    // it can get stuck in a weird state where callbacks are pushed into the
+    // microtask queue but the queue isn't being flushed, until the browser
+    // needs to do some other work, e.g. handle a timer. Therefore we can
+    // "force" the microtask queue to be flushed by adding an empty timer.
+    if (isIOS) setTimeout(noop)
+  }
+} else {
+  // fallback to macro
+  microTimerFunc = macroTimerFunc
+}
+
+/**
+ * Wrap a function so that if any code inside triggers state change,
+ * the changes are queued using a (macro) task instead of a microtask.
+ */
+export function withMacroTask (fn: Function): Function {
+  return fn._withTask || (fn._withTask = function () {
+    useMacroTask = true
+    try {
+      return fn.apply(null, arguments)
+    } finally {
+      useMacroTask = false    
+    }
+  })
+}
+
+export function nextTick (cb?: Function, ctx?: Object) {
+  let _resolve
+  callbacks.push(() => {
+    if (cb) {
+      try {
+        cb.call(ctx)
+      } catch (e) {
+        handleError(e, ctx, 'nextTick')
+      }
+    } else if (_resolve) {
+      _resolve(ctx)
+    }
+  })
+  if (!pending) {
+    pending = true
+    if (useMacroTask) {
+      macroTimerFunc()
+    } else {
+      microTimerFunc()
+    }
+  }
+  // $flow-disable-line
+  if (!cb && typeof Promise !== 'undefined') {
+    return new Promise(resolve => {
+      _resolve = resolve
+    })
+  }
+}
+```
+执行nextTick方法时优先采用microTimerFunc，microTimerFunc优先走promise。Vue内部对所有DOM操作用withMacroTask方法封装了一层，这样对于一些 DOM 交互事件，如 v-on 绑定的事件回调函数的处理，会强制走 macro task。而macroTimerFunc又会优先走setImmediate（目前只有IE10支持），其次走MessageChannel（大部分浏览器支持）。底层的原理其实就是根源于js里的Event-loop的执行原理。
+
 #### new Vue()
 ![生命周期示意图](https://cn.vuejs.org/images/lifecycle.png "Optional title")
