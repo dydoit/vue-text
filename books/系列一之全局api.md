@@ -405,6 +405,44 @@ export function nextTick (cb?: Function, ctx?: Object) {
 }
 ```
 执行nextTick方法时优先采用microTimerFunc，microTimerFunc优先走promise。Vue内部对所有DOM操作用withMacroTask方法封装了一层，这样对于一些 DOM 交互事件，如 v-on 绑定的事件回调函数的处理，会强制走 macro task。而macroTimerFunc又会优先走setImmediate（目前只有IE10支持），其次走MessageChannel（大部分浏览器支持）。底层的原理其实就是根源于js里的Event-loop的执行原理。
-
+4. Vue.set(target: Array<any> | Object, key: any, val: any)
+看源码
+```
+// src/core/observer/index.js中定义
+export function set (target: Array<any> | Object, key: any, val: any): any {
+  if (process.env.NODE_ENV !== 'production' &&
+    (isUndef(target) || isPrimitive(target))
+  ) {
+    warn(`Cannot set reactive property on undefined, null, or primitive value: ${(target: any)}`)
+  }
+  if (Array.isArray(target) && isValidArrayIndex(key)) {
+    target.length = Math.max(target.length, key)
+    target.splice(key, 1, val)
+    return val
+  }
+  if (key in target && !(key in Object.prototype)) {
+    target[key] = val
+    return val
+  }
+  const ob = (target: any).__ob__
+  if (target._isVue || (ob && ob.vmCount)) {
+    process.env.NODE_ENV !== 'production' && warn(
+      'Avoid adding reactive properties to a Vue instance or its root $data ' +
+      'at runtime - declare it upfront in the data option.'
+    )
+    return val
+  }
+  if (!ob) {
+    target[key] = val
+    return val
+  }
+  defineReactive(ob.value, key, val)
+  ob.dep.notify()
+  return val
+}
+// src/core/global-api/index.js中
+Vue.set = set
+```
+最后通过 defineReactive(ob.value, key, val) 把新添加的属性变成响应式对象，然后再通过 ob.dep.notify() 手动的触发依赖通知。
 #### new Vue()
 ![生命周期示意图](https://cn.vuejs.org/images/lifecycle.png "Optional title")
