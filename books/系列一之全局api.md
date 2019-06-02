@@ -107,14 +107,14 @@ build(builds)
 这段代码逻辑非常简单，先从配置文件读取配置，再通过命令行参数对构建配置做过滤，这样就可以构建出不同用途的 Vue.js 了。接下来我们看一下配置文件，在 scripts/config.js 中：(注意这是最终的boss，不同版本的vue入口文件和出口文件都定义了)
 ```
 const builds = {
-  // Runtime only (CommonJS). Used by bundlers e.g. Webpack & Browserify：主要用在打包工具browserify里，不带编译代码
+  // Runtime only (CommonJS). Used by bundlers e.g. Webpack & Browserify：以require的方式引入使用的，不带编译代码
   'web-runtime-cjs': {
     entry: resolve('web/entry-runtime.js'),
     dest: resolve('dist/vue.runtime.common.js'),
     format: 'cjs',
     banner
   },
-  // Runtime+compiler CommonJS build (CommonJS)：主要用在打包工具browserify里，带编译代码
+  // Runtime+compiler CommonJS build (CommonJS)：以require的方式引入时使用的，带编译代码
   'web-full-cjs': {
     entry: resolve('web/entry-runtime-with-compiler.js'),
     dest: resolve('dist/vue.common.js'),
@@ -444,5 +444,18 @@ export function set (target: Array<any> | Object, key: any, val: any): any {
 Vue.set = set
 ```
 最后通过 defineReactive(ob.value, key, val) 把新添加的属性变成响应式对象，然后再通过 ob.dep.notify() 手动的触发依赖通知。
-#### new Vue()
+##### 碎片化感悟
+1. vue必须执行render方法，即使你不写，vue内部也会去编译成render。
+#### new Vue()发生了什么？
 ![生命周期示意图](https://cn.vuejs.org/images/lifecycle.png "Optional title")
+```
+ function Vue(options){
+   this._init(options)
+ }
+ initMinxin(Vue)
+ stateMixin(Vue)
+ eventsMixin(Vue)
+ lifecycleMixin(Vue)
+ renderMixin(Vue)
+```
+首先执行initMinxin(Vue)里的_init方法
